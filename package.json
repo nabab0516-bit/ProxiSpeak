@@ -1,0 +1,31 @@
+{
+    "name": "proxispeak",
+    "version": "1.0.0",
+    "description": "ProxiSpeak — Proximity-based communication app",
+    "main": "index.js",
+    "scripts": {
+        "db:init": "node database/init.js",
+        "db:seed": "node database/init.js --seed"
+    },
+    "contributors": [
+        {
+            "name": "Yashi",
+            "role": "Backend"
+        },
+        {
+            "name": "Sumaria",
+            "role": "Frontend"
+        },
+        {
+            "name": "Veeresham",
+            "role": "Database"
+        },
+        {
+            "name": "Afjal",
+            "role": "Testing & Integration"
+        }
+    ],
+    "dependencies": {
+        "sql.js": "^1.12.0"
+    }
+}
