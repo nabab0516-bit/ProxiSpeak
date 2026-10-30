@@ -88,4 +88,52 @@ describe('Socket.IO server', () => {
             updateSpy.mockRestore();
         }
     });
+
+    test('updates avatar position successfully', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const client = createClient(`http://127.0.0.1:${port}`, {
+            forceNew: true,
+            reconnection: false,
+        });
+
+        try {
+            await new Promise((resolve, reject) => {
+                client.once('connect', resolve);
+                client.once('connect_error', reject);
+            });
+
+            await new Promise(resolve => {
+                client.emit(
+                    'room:join',
+                    {
+                        userId: 'yashi-move-test',
+                        displayName: 'Yashi',
+                        roomId: 'room101',
+                        position: { x: 100, y: 120 },
+                    },
+                    resolve
+                );
+            });
+
+            const result = await new Promise(resolve => {
+                client.emit(
+                    'avatar:move',
+                    {
+                        position: { x: 150, y: 180 },
+                    },
+                    resolve
+                );
+            });
+
+            expect(result.ok).toBe(true);
+            expect(result.position).toEqual({ x: 150, y: 180 });
+            expect(updateSpy).toHaveBeenCalledTimes(2);
+        } finally {
+            client.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
 });
