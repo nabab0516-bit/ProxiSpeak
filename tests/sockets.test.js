@@ -136,4 +136,67 @@ describe('Socket.IO server', () => {
             updateSpy.mockRestore();
         }
     });
+
+    test('notifies other users when an avatar disconnects', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const client1 = createClient(`http://127.0.0.1:${port}`, {
+            forceNew: true,
+            reconnection: false,
+        });
+
+        const client2 = createClient(`http://127.0.0.1:${port}`, {
+            forceNew: true,
+            reconnection: false,
+        });
+
+        try {
+            await Promise.all([
+                new Promise((resolve, reject) => {
+                    client1.once('connect', resolve);
+                    client1.once('connect_error', reject);
+                }),
+                new Promise((resolve, reject) => {
+                    client2.once('connect', resolve);
+                    client2.once('connect_error', reject);
+                }),
+            ]);
+
+            const joinRoom = (client, userId) =>
+                new Promise(resolve => {
+                    client.emit(
+                        'room:join',
+                        {
+                            userId,
+                            displayName: userId,
+                            roomId: 'disconnect-room',
+                            position: { x: 100, y: 100 },
+                        },
+                        resolve
+                    );
+                });
+
+            const result1 = await joinRoom(client1, 'yashi-disconnect');
+            const result2 = await joinRoom(client2, 'other-user');
+
+            expect(result1.ok).toBe(true);
+            expect(result2.ok).toBe(true);
+
+            const leftEvent = new Promise(resolve => {
+                client2.once('avatar:left', resolve);
+            });
+
+            client1.disconnect();
+
+            const data = await leftEvent;
+
+            expect(data.userId).toBe('yashi-disconnect');
+        } finally {
+            client1.disconnect();
+            client2.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
 });
