@@ -2,6 +2,7 @@ const http = require('http');
 const { io: createClient } = require('socket.io-client');
 const { attachSocketServer } = require('../src/sockets');
 const Avatar = require('../src/models/Avatar');
+const { DEFAULT_PROXIMITY_RADIUS_PX: radius } = require('../src/config/constants');
 
 describe('Socket.IO server', () => {
     let server;
@@ -27,6 +28,34 @@ describe('Socket.IO server', () => {
             server.close(resolve);
         });
     });
+
+    const createConnectedClient = async () => {
+        const client = createClient(`http://127.0.0.1:${port}`, {
+            forceNew: true,
+            reconnection: false,
+        });
+
+        await new Promise((resolve, reject) => {
+            client.once('connect', resolve);
+            client.once('connect_error', reject);
+        });
+
+        return client;
+    };
+
+    const joinRoom = (client, userId, roomId, position) =>
+        new Promise(resolve => {
+            client.emit(
+                'room:join',
+                {
+                    userId,
+                    displayName: userId,
+                    roomId,
+                    position,
+                },
+                resolve
+            );
+        });
 
     test('connects and emits server:ready', async () => {
         const client = createClient(`http://127.0.0.1:${port}`, {
@@ -55,29 +84,15 @@ describe('Socket.IO server', () => {
             .spyOn(Avatar, 'findOneAndUpdate')
             .mockResolvedValue({});
 
-        const client = createClient(`http://127.0.0.1:${port}`, {
-            forceNew: true,
-            reconnection: false,
-        });
+        const client = await createConnectedClient();
 
         try {
-            await new Promise((resolve, reject) => {
-                client.once('connect', resolve);
-                client.once('connect_error', reject);
-            });
-
-            const result = await new Promise(resolve => {
-                client.emit(
-                    'room:join',
-                    {
-                        userId: 'yashi-test',
-                        displayName: 'Yashi',
-                        roomId: 'room101',
-                        position: { x: 100, y: 120 },
-                    },
-                    resolve
-                );
-            });
+            const result = await joinRoom(
+                client,
+                'yashi-test',
+                'room101',
+                { x: 100, y: 120 }
+            );
 
             expect(result.ok).toBe(true);
             expect(result.roomId).toBe('room101');
@@ -94,36 +109,20 @@ describe('Socket.IO server', () => {
             .spyOn(Avatar, 'findOneAndUpdate')
             .mockResolvedValue({});
 
-        const client = createClient(`http://127.0.0.1:${port}`, {
-            forceNew: true,
-            reconnection: false,
-        });
+        const client = await createConnectedClient();
 
         try {
-            await new Promise((resolve, reject) => {
-                client.once('connect', resolve);
-                client.once('connect_error', reject);
-            });
-
-            await new Promise(resolve => {
-                client.emit(
-                    'room:join',
-                    {
-                        userId: 'yashi-move-test',
-                        displayName: 'Yashi',
-                        roomId: 'room101',
-                        position: { x: 100, y: 120 },
-                    },
-                    resolve
-                );
-            });
+            await joinRoom(
+                client,
+                'yashi-move-test',
+                'room101',
+                { x: 100, y: 120 }
+            );
 
             const result = await new Promise(resolve => {
                 client.emit(
                     'avatar:move',
-                    {
-                        position: { x: 150, y: 180 },
-                    },
+                    { position: { x: 150, y: 180 } },
                     resolve
                 );
             });
@@ -142,44 +141,23 @@ describe('Socket.IO server', () => {
             .spyOn(Avatar, 'findOneAndUpdate')
             .mockResolvedValue({});
 
-        const client1 = createClient(`http://127.0.0.1:${port}`, {
-            forceNew: true,
-            reconnection: false,
-        });
-
-        const client2 = createClient(`http://127.0.0.1:${port}`, {
-            forceNew: true,
-            reconnection: false,
-        });
+        const client1 = await createConnectedClient();
+        const client2 = await createConnectedClient();
 
         try {
-            await Promise.all([
-                new Promise((resolve, reject) => {
-                    client1.once('connect', resolve);
-                    client1.once('connect_error', reject);
-                }),
-                new Promise((resolve, reject) => {
-                    client2.once('connect', resolve);
-                    client2.once('connect_error', reject);
-                }),
-            ]);
+            const result1 = await joinRoom(
+                client1,
+                'yashi-disconnect',
+                'disconnect-room',
+                { x: 100, y: 100 }
+            );
 
-            const joinRoom = (client, userId) =>
-                new Promise(resolve => {
-                    client.emit(
-                        'room:join',
-                        {
-                            userId,
-                            displayName: userId,
-                            roomId: 'disconnect-room',
-                            position: { x: 100, y: 100 },
-                        },
-                        resolve
-                    );
-                });
-
-            const result1 = await joinRoom(client1, 'yashi-disconnect');
-            const result2 = await joinRoom(client2, 'other-user');
+            const result2 = await joinRoom(
+                client2,
+                'other-user',
+                'disconnect-room',
+                { x: 120, y: 120 }
+            );
 
             expect(result1.ok).toBe(true);
             expect(result2.ok).toBe(true);
@@ -196,6 +174,125 @@ describe('Socket.IO server', () => {
         } finally {
             client1.disconnect();
             client2.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
+    test('sends WebRTC signal to a nearby user in the same room', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const sender = await createConnectedClient();
+        const receiver = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                sender,
+                'signal-sender',
+                'signal-room',
+                { x: 100, y: 100 }
+            );
+
+            await joinRoom(
+                receiver,
+                'signal-receiver',
+                'signal-room',
+                { x: 120, y: 120 }
+            );
+
+            const signal = { type: 'offer', sdp: 'test-sdp-data' };
+
+            const receivedSignal = new Promise(resolve => {
+                receiver.once('webrtc:signal', resolve);
+            });
+
+            const result = await new Promise(resolve => {
+                sender.emit(
+                    'webrtc:signal',
+                    {
+                        targetUserId: 'signal-receiver',
+                        signal,
+                    },
+                    resolve
+                );
+            });
+
+            const data = await receivedSignal;
+
+            expect(result.ok).toBe(true);
+            expect(data.fromUserId).toBe('signal-sender');
+            expect(data.signal).toEqual(signal);
+        } finally {
+            sender.disconnect();
+            receiver.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
+    test('rejects WebRTC signaling if sender has not joined a room', async () => {
+        const sender = await createConnectedClient();
+
+        try {
+            const result = await new Promise(resolve => {
+                sender.emit(
+                    'webrtc:signal',
+                    {
+                        targetUserId: 'some-user',
+                        signal: { type: 'offer' },
+                    },
+                    resolve
+                );
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toBe('Join a room before signaling');
+        } finally {
+            sender.disconnect();
+        }
+    });
+
+    test('rejects WebRTC signal when target is outside proximity radius', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const sender = await createConnectedClient();
+        const receiver = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                sender,
+                'far-sender',
+                'far-room',
+                { x: 100, y: 100 }
+            );
+
+            await joinRoom(
+                receiver,
+                'far-receiver',
+                'far-room',
+                { x: 100 + radius + 100, y: 100 }
+            );
+
+            const result = await new Promise(resolve => {
+                sender.emit(
+                    'webrtc:signal',
+                    {
+                        targetUserId: 'far-receiver',
+                        signal: { type: 'offer' },
+                    },
+                    resolve
+                );
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toBe(
+                'Target user is outside the proximity radius'
+            );
+        } finally {
+            sender.disconnect();
+            receiver.disconnect();
             updateSpy.mockRestore();
         }
     });
