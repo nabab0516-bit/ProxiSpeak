@@ -296,4 +296,72 @@ describe('Socket.IO server', () => {
             updateSpy.mockRestore();
         }
     });
+
+    test('keeps avatar online while another tab is connected', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const tab1 = await createConnectedClient();
+        const tab2 = await createConnectedClient();
+        const observer = await createConnectedClient();
+
+        try {
+            const result1 = await joinRoom(
+                tab1,
+                'multi-tab-user',
+                'multi-tab-room',
+                { x: 100, y: 100 }
+            );
+
+            const result2 = await joinRoom(
+                tab2,
+                'multi-tab-user',
+                'multi-tab-room',
+                { x: 100, y: 100 }
+            );
+
+            const observerResult = await joinRoom(
+                observer,
+                'observer-user',
+                'multi-tab-room',
+                { x: 120, y: 120 }
+            );
+
+            expect(result1.ok).toBe(true);
+            expect(result2.ok).toBe(true);
+            expect(observerResult.ok).toBe(true);
+
+            let leftCount = 0;
+
+            observer.on('avatar:left', data => {
+                if (data.userId === 'multi-tab-user') {
+                    leftCount++;
+                }
+            });
+
+            tab1.disconnect();
+
+            await new Promise(resolve => setTimeout(resolve, 150));
+
+            // First tab disconnects, but the avatar must remain online.
+            expect(leftCount).toBe(0);
+
+            const leftEvent = new Promise(resolve => {
+                observer.once('avatar:left', resolve);
+            });
+
+            tab2.disconnect();
+
+            const data = await leftEvent;
+
+            expect(data.userId).toBe('multi-tab-user');
+            expect(leftCount).toBe(1);
+        } finally {
+            tab1.disconnect();
+            tab2.disconnect();
+            observer.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
 });
