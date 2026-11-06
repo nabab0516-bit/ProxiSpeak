@@ -2,7 +2,9 @@ const http = require('http');
 const { io: createClient } = require('socket.io-client');
 const { attachSocketServer } = require('../src/sockets');
 const Avatar = require('../src/models/Avatar');
-const { DEFAULT_PROXIMITY_RADIUS_PX: radius } = require('../src/config/constants');
+const {
+    DEFAULT_PROXIMITY_RADIUS_PX: radius
+} = require('../src/config/constants');
 
 describe('Socket.IO server', () => {
     let server;
@@ -64,8 +66,14 @@ describe('Socket.IO server', () => {
         });
 
         try {
+            // Register server:ready listener BEFORE connecting.
             const ready = new Promise((resolve, reject) => {
                 client.once('server:ready', resolve);
+                client.once('connect_error', reject);
+            });
+
+            await new Promise((resolve, reject) => {
+                client.once('connect', resolve);
                 client.once('connect_error', reject);
             });
 
@@ -104,6 +112,24 @@ describe('Socket.IO server', () => {
         }
     });
 
+    test('rejects invalid room join data', async () => {
+        const client = await createConnectedClient();
+
+        try {
+            const result = await joinRoom(
+                client,
+                '',
+                'room101',
+                { x: 100, y: 120 }
+            );
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toBe('Invalid room join data');
+        } finally {
+            client.disconnect();
+        }
+    });
+
     test('updates avatar position successfully', async () => {
         const updateSpy = jest
             .spyOn(Avatar, 'findOneAndUpdate')
@@ -132,6 +158,83 @@ describe('Socket.IO server', () => {
             expect(updateSpy).toHaveBeenCalledTimes(2);
         } finally {
             client.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
+    test('rejects invalid avatar movement', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const client = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                client,
+                'invalid-move-user',
+                'invalid-move-room',
+                { x: 100, y: 100 }
+            );
+
+            const result = await new Promise(resolve => {
+                client.emit(
+                    'avatar:move',
+                    { position: { x: -10, y: 50 } },
+                    resolve
+                );
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toBe('Invalid avatar movement');
+            expect(updateSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            client.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
+    test('broadcasts nearby users within proximity radius', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const client1 = await createConnectedClient();
+        const client2 = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                client1,
+                'nearby-user-1',
+                'nearby-room',
+                { x: 100, y: 100 }
+            );
+
+            const nearbyEvent = new Promise(resolve => {
+                client1.once('proximity:update', resolve);
+            });
+
+            await joinRoom(
+                client2,
+                'nearby-user-2',
+                'nearby-room',
+                { x: 120, y: 120 }
+            );
+
+            const nearby = await nearbyEvent;
+
+            expect(nearby).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        userId: 'nearby-user-2',
+                        displayName: 'nearby-user-2',
+                        position: { x: 120, y: 120 }
+                    })
+                ])
+            );
+        } finally {
+            client1.disconnect();
+            client2.disconnect();
             updateSpy.mockRestore();
         }
     });
@@ -174,6 +277,67 @@ describe('Socket.IO server', () => {
         } finally {
             client1.disconnect();
             client2.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
+    test('notifies users when an avatar changes rooms', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const movingClient = await createConnectedClient();
+        const oldRoomObserver = await createConnectedClient();
+        const newRoomObserver = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                movingClient,
+                'room-change-user',
+                'old-room',
+                { x: 100, y: 100 }
+            );
+
+            await joinRoom(
+                oldRoomObserver,
+                'old-room-observer',
+                'old-room',
+                { x: 110, y: 110 }
+            );
+
+            await joinRoom(
+                newRoomObserver,
+                'new-room-observer',
+                'new-room',
+                { x: 120, y: 120 }
+            );
+
+            const leftEvent = new Promise(resolve => {
+                oldRoomObserver.once('avatar:left', resolve);
+            });
+
+            const joinedEvent = new Promise(resolve => {
+                newRoomObserver.once('avatar:joined', resolve);
+            });
+
+            const result = await joinRoom(
+                movingClient,
+                'room-change-user',
+                'new-room',
+                { x: 130, y: 130 }
+            );
+
+            const leftData = await leftEvent;
+            const joinedData = await joinedEvent;
+
+            expect(result.ok).toBe(true);
+            expect(result.roomId).toBe('new-room');
+            expect(leftData.userId).toBe('room-change-user');
+            expect(joinedData.userId).toBe('room-change-user');
+        } finally {
+            movingClient.disconnect();
+            oldRoomObserver.disconnect();
+            newRoomObserver.disconnect();
             updateSpy.mockRestore();
         }
     });
@@ -297,6 +461,49 @@ describe('Socket.IO server', () => {
         }
     });
 
+    test('rejects WebRTC signal when target belongs to another room', async () => {
+        const updateSpy = jest
+            .spyOn(Avatar, 'findOneAndUpdate')
+            .mockResolvedValue({});
+
+        const sender = await createConnectedClient();
+        const receiver = await createConnectedClient();
+
+        try {
+            await joinRoom(
+                sender,
+                'different-room-sender',
+                'room-A',
+                { x: 100, y: 100 }
+            );
+
+            await joinRoom(
+                receiver,
+                'different-room-receiver',
+                'room-B',
+                { x: 110, y: 110 }
+            );
+
+            const result = await new Promise(resolve => {
+                sender.emit(
+                    'webrtc:signal',
+                    {
+                        targetUserId: 'different-room-receiver',
+                        signal: { type: 'offer' },
+                    },
+                    resolve
+                );
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toBe('Target user is unavailable');
+        } finally {
+            sender.disconnect();
+            receiver.disconnect();
+            updateSpy.mockRestore();
+        }
+    });
+
     test('keeps avatar online while another tab is connected', async () => {
         const updateSpy = jest
             .spyOn(Avatar, 'findOneAndUpdate')
@@ -344,7 +551,6 @@ describe('Socket.IO server', () => {
 
             await new Promise(resolve => setTimeout(resolve, 150));
 
-            // First tab disconnects, but the avatar must remain online.
             expect(leftCount).toBe(0);
 
             const leftEvent = new Promise(resolve => {
