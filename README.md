@@ -37,9 +37,10 @@ Client -> server:
 - `webrtc:signal`: `{ targetUserId, signal }` (only if target is in the same room and within radius)
 
 Server -> client:
-- `server:ready`, `avatar:joined`, `avatar:moved`, `avatar:left`, `proximity:users`, `webrtc:signal`
+- `server:ready`, `avatar:joined`, `avatar:moved`, `avatar:left`, `proximity:update`, `webrtc:signal`
 
 Socket.IO carries signaling messages only. The browser frontend must implement WebRTC (`getUserMedia`, `RTCPeerConnection`) and Web Audio API handling; this backend does not itself capture or transmit raw audio.
 
 ## Scope and limitations
 The brief specifies MongoDB geospatial queries. This starter uses Euclidean distance for live X/Y pixel positions and MongoDB for persistence, rather than MongoDB `$near`/`$geoWithin`; update this if your evaluator requires those operators explicitly. Week 3 Redis Pub/Sub adapter for multi-instance Socket.IO is not configured yet. Authentication/authorization is not implemented, so use locally for development only until those controls are added.
+
