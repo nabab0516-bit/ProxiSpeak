@@ -37,7 +37,7 @@ Client -> server:
 - `webrtc:signal`: `{ targetUserId, signal }` (only if target is in the same room and within radius)
 
 Server -> client:
-- `server:ready`, `avatar:joined`, `avatar:moved`, `avatar:left`, `proximity:update`, `webrtc:signal`
+- `server:ready`, `room:joined`, `avatar:joined`, `avatar:moved`, `avatar:left`, `proximity:update`, `webrtc:signal`
 
 Socket.IO carries signaling messages only. The browser frontend must implement WebRTC (`getUserMedia`, `RTCPeerConnection`) and Web Audio API handling; this backend does not itself capture or transmit raw audio.
 
