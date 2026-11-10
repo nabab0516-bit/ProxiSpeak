@@ -1,0 +1,7 @@
+{
+  "name":"proxispeak-backend","version":"1.0.0","description":"ProxiSpeak Node.js backend",
+  "main":"src/server.js","scripts":{"start":"node src/server.js","dev":"nodemon src/server.js","test":"jest --runInBand","lint-check":"node --check src/server.js && node --check src/app.js"},
+  "engines":{"node":">=20"},
+  "dependencies":{"cors":"^2.8.5","dotenv":"^16.4.7","express":"^4.21.2","helmet":"^8.0.0","mongoose":"^8.9.5","socket.io":"^4.8.1"},
+  "devDependencies":{"jest":"^29.7.0","nodemon":"^3.1.9","socket.io-client":"^4.8.1","supertest":"^7.0.0"}
+}
